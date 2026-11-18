@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build app (universal, ad-hoc signed)
+        run: ./scripts/build-app.sh direct
+
+      - name: Build App Store flavor (sandboxed)
+        run: ./scripts/build-app.sh appstore
+
+      - name: Package
+        run: ditto -c -k --keepParent build/MacClipboard.app MacClipboard.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacClipboard
+          path: MacClipboard.zip

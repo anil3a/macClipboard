@@ -1,0 +1,30 @@
+name: Release
+
+# Push a tag like v1.0.0 to publish a GitHub Release with the app attached.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test
+        run: swift test
+
+      - name: Build release zip
+        run: VERSION="${GITHUB_REF_NAME#v}" ./scripts/release-github.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/MacClipboard-*.zip build/MacClipboard-*.zip.sha256 \
+            --title "MacClipboard ${GITHUB_REF_NAME}" --generate-notes
