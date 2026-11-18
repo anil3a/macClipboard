@@ -7,7 +7,8 @@
 #   appstore  Mac App Store build: sandboxed                                    -> build/AppStore/MacClipboard.app
 #
 # Environment:
-#   CODESIGN_IDENTITY     signing identity (default "-" = ad-hoc, fine for local use)
+#   CODESIGN_IDENTITY     signing identity. If unset, the name in ./.codesign-identity (not committed)
+#                         is used, else "-" (ad-hoc, fine for local use)
 #   BUNDLE_ID             default io.github.anil3a.MacClipboard
 #   VERSION, BUILD_NUMBER override the version in Resources/Info.plist / the commit count
 #   UNIVERSAL=0           build only for this Mac's architecture (faster)
@@ -16,7 +17,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 FLAVOR="${1:-direct}"
-IDENTITY="${CODESIGN_IDENTITY:--}"
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  IDENTITY="$CODESIGN_IDENTITY"
+elif [[ -s .codesign-identity ]]; then
+  IDENTITY="$(head -n 1 .codesign-identity)"
+else
+  IDENTITY="-"
+fi
 BUNDLE_ID="${BUNDLE_ID:-io.github.anil3a.MacClipboard}"
 PLIST_BUDDY=/usr/libexec/PlistBuddy
 VERSION="${VERSION:-$($PLIST_BUDDY -c 'Print CFBundleShortVersionString' Resources/Info.plist)}"
@@ -70,7 +77,10 @@ fi
 
 # --- Sign --------------------------------------------------------------------
 SIGN_ARGS=(--force --options runtime --entitlements "$SIGN_ENTITLEMENTS" --sign "$IDENTITY")
-[[ "$IDENTITY" != "-" ]] && SIGN_ARGS+=(--timestamp)
+# Secure timestamps come from Apple and are only needed for Apple-issued certificates.
+if [[ "$IDENTITY" =~ ^(Developer\ ID|Apple\ Distribution|Apple\ Development|3rd\ Party) ]]; then
+  SIGN_ARGS+=(--timestamp)
+fi
 codesign "${SIGN_ARGS[@]}" "$APP"
 codesign --verify --strict --verbose=1 "$APP"
 rm -f "$SIGN_ENTITLEMENTS"

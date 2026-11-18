@@ -1,6 +1,6 @@
 APP := build/MacClipboard.app
 
-.PHONY: app run install appstore release test icon clean
+.PHONY: app run install appstore release publish test icon clean
 
 ## Build build/MacClipboard.app (universal, ad-hoc signed unless CODESIGN_IDENTITY is set)
 app:
@@ -22,9 +22,13 @@ install: app
 appstore:
 	./scripts/build-app.sh appstore
 
-## Zip for GitHub Releases (notarized when NOTARY_PROFILE is set)
+## Build the downloadable .dmg and .zip into ./build (notarized when NOTARY_PROFILE is set)
 release:
 	./scripts/release-github.sh
+
+## Build, tag v<version>, push and publish a GitHub Release with the .dmg/.zip attached
+publish:
+	./scripts/publish-github.sh
 
 ## Unit tests (needs Xcode; also run by GitHub Actions)
 test:

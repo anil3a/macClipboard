@@ -110,6 +110,10 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("Version", value: version)
+                LabeledContent("Author", value: "Anil Prajapati Newa")
+                if let copyright = Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String {
+                    Text(copyright).font(.footnote).foregroundStyle(.secondary)
+                }
                 Link("Source code on GitHub", destination: URL(string: "https://github.com/anil3a/macClipboard")!)
             }
         }

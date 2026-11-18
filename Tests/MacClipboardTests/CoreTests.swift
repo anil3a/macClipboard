@@ -170,3 +170,30 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettings(defaults: defaults).historyLimit, AppSettings.defaultHistoryLimit)
     }
 }
+
+final class SearchTests: XCTestCase {
+    private func text(_ s: String) -> ClipboardItem {
+        ItemAnalyzer.analyze([[PasteboardRepresentation(type: ItemAnalyzer.utf8Text, data: Data(s.utf8))]]).item
+    }
+
+    func testMatchesAllWordsCaseAndAccentInsensitive() {
+        let item = text("git commit -m \"Fix café menu\"")
+        XCTAssertTrue(item.matches("GIT"))
+        XCTAssertTrue(item.matches("cafe"))
+        XCTAssertTrue(item.matches("menu commit"))
+        XCTAssertFalse(item.matches("commit push"))
+        XCTAssertTrue(item.matches("   "))
+    }
+
+    func testFilterFilesAndImages() throws {
+        let files = ItemAnalyzer.analyze([[PasteboardRepresentation(type: ItemAnalyzer.fileURL, data: Data("file:///Users/me/report.pdf".utf8))]]).item
+        let png = try XCTUnwrap(ItemAnalyzerTests.makePNG(width: 40, height: 20))
+        let image = ItemAnalyzer.analyze([[PasteboardRepresentation(type: "public.png", data: png)]]).item
+        let items = [text("hello"), files, image]
+
+        XCTAssertEqual(ClipboardItem.filter(items, query: "").count, 3)
+        XCTAssertEqual(ClipboardItem.filter(items, query: "report").map(\.id), [files.id])
+        XCTAssertEqual(ClipboardItem.filter(items, query: "screenshot").map(\.id), [image.id])
+        XCTAssertTrue(ClipboardItem.filter(items, query: "nothing-matches").isEmpty)
+    }
+}

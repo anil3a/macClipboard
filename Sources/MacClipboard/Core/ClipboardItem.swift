@@ -42,3 +42,33 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         case id, date, isPinned, kind, preview, filePaths, textLength, pixelWidth, pixelHeight, byteCount, contentHash, hasText
     }
 }
+
+// MARK: Search
+
+extension ClipboardItem {
+    /// Text the search box looks through. For text items this is the stored preview
+    /// (the first `ItemAnalyzer.previewCharacterLimit` characters).
+    var searchableText: String {
+        switch kind {
+        case .text, .other:
+            return preview
+        case .files:
+            return filePaths.joined(separator: "\n")
+        case .image:
+            let size = pixelWidth.flatMap { w in pixelHeight.map { "\(w)x\($0) \(w)×\($0)" } } ?? ""
+            return "image picture screenshot \(size)"
+        }
+    }
+
+    /// Every word of the query must appear (case- and accent-insensitive), in any order.
+    func matches(_ query: String) -> Bool {
+        let terms = query.split(whereSeparator: \.isWhitespace)
+        guard !terms.isEmpty else { return true }
+        let text = searchableText
+        return terms.allSatisfy { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    static func filter(_ items: [ClipboardItem], query: String) -> [ClipboardItem] {
+        query.allSatisfy(\.isWhitespace) ? items : items.filter { $0.matches(query) }
+    }
+}

@@ -11,6 +11,10 @@ struct HistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            SearchField(text: $model.query, model: model)
+                .frame(height: 24)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
             if model.needsAccessibility { accessibilityBanner }
             Group {
                 if !settings.isEnabled && store.items.isEmpty {
@@ -25,6 +29,12 @@ struct HistoryView: View {
                         message: "Copy text, images or files and they'll show up here.",
                         button: nil
                     )
+                } else if visibleItems.isEmpty {
+                    placeholder(
+                        title: "No results",
+                        message: "Nothing in your history matches \u{201C}\(model.query)\u{201D}.",
+                        button: ("Clear search", { model.query = "" })
+                    )
                 } else {
                     list
                 }
@@ -37,6 +47,10 @@ struct HistoryView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
         )
+    }
+
+    private var visibleItems: [ClipboardItem] {
+        ClipboardItem.filter(store.items, query: model.query)
     }
 
     private var header: some View {
@@ -81,7 +95,7 @@ struct HistoryView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    ForEach(store.items) { item in
+                    ForEach(visibleItems) { item in
                         ClipboardItemCard(
                             item: item,
                             isSelected: item.id == model.selectedID,
@@ -104,7 +118,7 @@ struct HistoryView: View {
     }
 
     private var footer: some View {
-        Text("↑↓ select   ↩ paste   ⇧↩ paste as text   P pin   ⌫ delete")
+        Text("↑↓ select   ↩ paste   ⇧↩ as text   ⌘P pin   ⌘⌫ delete")
             .font(.system(size: 10.5))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -267,5 +281,38 @@ struct ClipboardItemContent: View {
         let trimmed = text.prefix(600).trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "(blank)" }
         return trimmed.replacingOccurrences(of: "\t", with: "    ")
+    }
+}
+
+/// Native macOS search field (magnifier, clear button) bound to the search query.
+struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    let model: HistoryViewModel
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = "Search clipboard history"
+        field.font = .systemFont(ofSize: 12.5)
+        field.focusRingType = .none
+        field.sendsSearchStringImmediately = true
+        field.delegate = context.coordinator
+        model.searchField = field
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        private let text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
+        }
     }
 }

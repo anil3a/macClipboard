@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import SwiftUI
 
 /// A borderless floating panel that takes keyboard input without activating our app,
@@ -39,6 +40,9 @@ final class HistoryViewModel: ObservableObject {
     /// Set only by keyboard navigation, so hovering doesn't make the list jump.
     @Published var scrollTarget: UUID?
     @Published var needsAccessibility = false
+    @Published var query = ""
+    /// The search field, so the controller can focus it when the panel opens.
+    weak var searchField: NSSearchField?
     /// Mouse position at the last keyboard move; hover is ignored until the mouse actually moves.
     var mouseLocationAtKeyboardMove: NSPoint?
 }
@@ -51,6 +55,7 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
     private let model = HistoryViewModel()
     private let panel = HistoryPanel(size: HistoryWindowController.panelSize)
     private var clickMonitor: Any?
+    private var cancellables = Set<AnyCancellable>()
 
     init(store: ClipboardStore, settings: AppSettings) {
         self.store = store
@@ -78,6 +83,22 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
         panel.contentView = effect
         panel.delegate = self
         panel.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
+
+        // Typing in the search box selects the first match.
+        model.$query
+            .removeDuplicates()
+            .sink { [weak self] query in
+                guard let self else { return }
+                let first = ClipboardItem.filter(self.store.items, query: query).first?.id
+                self.model.selectedID = first
+                self.model.scrollTarget = first
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Items shown for the current search.
+    private var visibleItems: [ClipboardItem] {
+        ClipboardItem.filter(store.items, query: model.query)
     }
 
     var isVisible: Bool { panel.isVisible }
@@ -88,6 +109,7 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         model.needsAccessibility = !Accessibility.canPaste
+        model.query = ""
         model.selectedID = store.items.first?.id
         model.scrollTarget = store.items.first?.id
         model.mouseLocationAtKeyboardMove = NSEvent.mouseLocation
@@ -95,6 +117,7 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
         panel.setFrameOrigin(origin(for: Self.panelSize))
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
+        if let field = model.searchField { panel.makeFirstResponder(field) }
 
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             self?.hide()
@@ -160,11 +183,11 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
     }
 
     private var selectedIndex: Int? {
-        store.items.firstIndex { $0.id == model.selectedID }
+        visibleItems.firstIndex { $0.id == model.selectedID }
     }
 
     private func select(index: Int) {
-        let items = store.items
+        let items = visibleItems
         guard !items.isEmpty else { model.selectedID = nil; return }
         let clamped = min(max(index, 0), items.count - 1)
         model.selectedID = items[clamped].id
@@ -172,36 +195,53 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
         model.mouseLocationAtKeyboardMove = NSEvent.mouseLocation
     }
 
+    /// Navigation keys are handled here before the search field sees them; everything else
+    /// (letters, ⌫, ←/→) goes to the search field as normal typing.
     private func handleKey(_ event: NSEvent) -> Bool {
-        let items = store.items
+        let items = visibleItems
         let current = selectedIndex
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
 
         switch Int(event.keyCode) {
         case kVK_Escape:
-            hide()
+            if model.query.isEmpty { hide() } else { model.query = "" }
         case kVK_UpArrow:
             select(index: (current ?? 0) - 1)
         case kVK_DownArrow:
             select(index: current.map { $0 + 1 } ?? 0)
-        case kVK_Home, kVK_PageUp:
+        case kVK_PageUp:
             select(index: 0)
-        case kVK_End, kVK_PageDown:
+        case kVK_PageDown:
             select(index: items.count - 1)
         case kVK_Return, kVK_ANSI_KeypadEnter:
             if let current { paste(items[current], plainTextOnly: modifiers.contains(.shift) && items[current].hasText) }
-        case kVK_Delete, kVK_ForwardDelete:
+        case kVK_Delete where modifiers == .command, kVK_ForwardDelete where modifiers == .command:
             if let current {
                 store.delete(items[current].id)
                 select(index: current)
             }
-        case kVK_ANSI_P where modifiers.isEmpty || modifiers == .command:
+        case kVK_ANSI_P where modifiers == .command:
             if let current { store.togglePin(items[current].id) }
         default:
-            // Let ⌘-shortcuts etc. fall through, swallow everything else.
-            return modifiers.contains(.command) ? false : true
+            return handleEditingShortcut(event, modifiers: modifiers)
         }
         return true
+    }
+
+    /// This app has no Edit menu, so ⌘A/⌘C/⌘X/⌘V/⌘Z in the search field are routed by hand.
+    private func handleEditingShortcut(_ event: NSEvent, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard modifiers == .command || modifiers == [.command, .shift] else { return false }
+        let action: Selector?
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a": action = #selector(NSText.selectAll(_:))
+        case "c": action = #selector(NSText.copy(_:))
+        case "x": action = #selector(NSText.cut(_:))
+        case "v": action = #selector(NSText.paste(_:))
+        case "z": action = modifiers.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+        default: action = nil
+        }
+        guard let action else { return false }
+        return NSApp.sendAction(action, to: nil, from: panel)
     }
 
     private static func roundedMask(radius: CGFloat) -> NSImage {
