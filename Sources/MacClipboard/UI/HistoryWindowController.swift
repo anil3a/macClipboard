@@ -164,7 +164,8 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
             guard success else { NSSound.beep(); return }
             guard Accessibility.canPaste else {
                 // Without permission we can only copy; the user presses ⌘V themselves.
-                Accessibility.requestAccess()
+                // The panel's banner explains this, so don't raise the system dialog on every paste.
+                Accessibility.requestAccessOncePerLaunch()
                 return
             }
             // Give the previous app a moment to get keyboard focus back.

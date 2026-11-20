@@ -38,11 +38,13 @@ esac
 # --- Compile -----------------------------------------------------------------
 if [[ "${UNIVERSAL:-1}" == "1" ]]; then
   BINARIES=()
+  mkdir -p build
   for ARCH in arm64 x86_64; do
     swift build -c release --triple "$ARCH-apple-macosx13.0"
-    BINARIES+=("$(swift build -c release --triple "$ARCH-apple-macosx13.0" --show-bin-path)/MacClipboard")
+    # Newer SwiftPM writes every triple to the same bin path, so copy each slice out before the next build.
+    cp "$(swift build -c release --triple "$ARCH-apple-macosx13.0" --show-bin-path)/MacClipboard" "build/MacClipboard-$ARCH"
+    BINARIES+=("build/MacClipboard-$ARCH")
   done
-  mkdir -p build
   lipo -create "${BINARIES[@]}" -output build/MacClipboard-universal
   BINARY="build/MacClipboard-universal"
 else
