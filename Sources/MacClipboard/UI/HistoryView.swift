@@ -170,6 +170,9 @@ struct ClipboardItemCard: View {
                 if isSelected || item.isPinned {
                     iconButton(item.isPinned ? "pin.fill" : "pin", help: item.isPinned ? "Unpin" : "Pin", action: onTogglePin)
                 }
+                if isSelected && item.hasText {
+                    iconButton("textformat", help: "Paste as Plain Text (⇧↩)") { onPaste(true) }
+                }
                 if isSelected {
                     iconButton("trash", help: "Delete", action: onDelete)
                 }

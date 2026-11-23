@@ -12,7 +12,7 @@ Press **⇧⌘V** anywhere. A panel opens next to your text cursor with everythi
 - **Survives restarts.** History is saved to disk, encrypted. You can turn this off.
 - **Large copies.** Very long text (up to 256 MB per copy), screenshots and images, rich text, and files copied in Finder. Only small previews are kept in memory; the full content is loaded from disk when you paste.
 - **Search.** Just start typing when the panel opens, or click the search box. Every word you type must match (case- and accent-insensitive). It searches text (the first 3,000 characters of each item), file names and paths, and "image" / "screenshot".
-- **Paste into anything**: click or press ↩. ⇧↩ pastes as plain text.
+- **Paste into anything**: click or press ↩. ⇧↩, or the **Aa** button on the selected item, pastes as plain text.
 - **Pin** items you use often so they're never removed.
 - **Clear all** keeps pinned items. **Erase All History** in Settings removes everything.
 - **Opens at your text cursor**, or at the mouse pointer when the app doesn't report a cursor position.
