@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &cancellables)
 
         if !Accessibility.canPaste {
-            Accessibility.requestAccess()
+            Accessibility.requestAccessOncePerLaunch()
         }
     }
 

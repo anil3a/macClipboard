@@ -23,6 +23,17 @@ enum Accessibility {
         }
     }
 
+    private static var didPromptThisLaunch = false
+
+    /// Shows the system prompt at most once per launch. Use this for automatic checks so a missing or
+    /// stale permission doesn't produce a dialog every time the user pastes; explicit "Allow…" buttons
+    /// call `requestAccess()` directly.
+    static func requestAccessOncePerLaunch() {
+        guard !didPromptThisLaunch else { return }
+        didPromptThisLaunch = true
+        requestAccess()
+    }
+
     static func openSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
