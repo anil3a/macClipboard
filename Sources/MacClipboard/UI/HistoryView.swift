@@ -7,6 +7,7 @@ struct HistoryView: View {
     @ObservedObject var model: HistoryViewModel
     let onPaste: (ClipboardItem, Bool) -> Void
     let onHoverItem: (UUID) -> Void
+    let onResize: (ResizePhase) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,7 +43,12 @@ struct HistoryView: View {
             .frame(maxHeight: .infinity)
             footer
         }
-        .frame(width: HistoryWindowController.panelSize.width, height: HistoryWindowController.panelSize.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
+            ResizeGrip(onResize: onResize)
+                .frame(height: 10)
+                .help("Drag to resize")
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
@@ -53,26 +59,34 @@ struct HistoryView: View {
         ClipboardItem.filter(store.items, query: model.query)
     }
 
+    /// The title area doubles as the panel's title bar: drag it to move the panel.
     private var header: some View {
-        HStack {
-            Text("Clipboard history")
-                .font(.system(size: 13, weight: .semibold))
-            if !settings.isEnabled {
-                Text("Paused")
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.secondary.opacity(0.2)))
+        HStack(spacing: 0) {
+            HStack {
+                Text("Clipboard history")
+                    .font(.system(size: 13, weight: .semibold))
+                if !settings.isEnabled {
+                    Text("Paused")
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.2)))
+                }
+                Spacer(minLength: 8)
             }
-            Spacer()
+            .padding(.leading, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+            .overlay(WindowDragArea())
+
             Button("Clear all") { store.clearUnpinned() }
                 .buttonStyle(.borderless)
                 .font(.system(size: 12))
                 .disabled(!store.hasUnpinnedItems)
                 .help("Remove everything except pinned items")
+                .padding(.trailing, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
     }
 
     private var accessibilityBanner: some View {
@@ -122,8 +136,16 @@ struct HistoryView: View {
             .font(.system(size: 10.5))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
+            .padding(.top, 7)
+            .padding(.bottom, 9)
             .overlay(alignment: .top) { Divider().opacity(0.6) }
+            .overlay(alignment: .bottom) {
+                // Grabber hinting that the bottom edge can be dragged.
+                Capsule()
+                    .fill(Color.primary.opacity(0.2))
+                    .frame(width: 34, height: 3.5)
+                    .padding(.bottom, 2.5)
+            }
     }
 
     private func placeholder(title: String, message: String, button: (String, () -> Void)?) -> some View {
@@ -154,8 +176,14 @@ struct ClipboardItemCard: View {
 
     private let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
 
+    private static let iconSize: CGFloat = 20
+    private static let iconInset: CGFloat = 3
+    /// Tall enough for all three buttons (pin, plain text, delete), so a card never
+    /// changes height when it's selected or hovered.
+    static let minHeight = iconSize * 3 + iconInset * 2
+
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 2) {
             VStack(alignment: .leading, spacing: 5) {
                 ClipboardItemContent(item: item)
                 if let caption = Self.caption(for: item) {
@@ -165,6 +193,8 @@ struct ClipboardItemCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 9)
+            .padding(.leading, 12)
 
             VStack(spacing: 0) {
                 if isSelected || item.isPinned {
@@ -178,13 +208,13 @@ struct ClipboardItemCard: View {
                 }
             }
             .frame(width: 24)
+            .padding(.vertical, Self.iconInset)
+            .padding(.trailing, 4)
         }
-        .padding(.vertical, 9)
-        .padding(.leading, 12)
-        .padding(.trailing, 4)
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: Self.minHeight, alignment: .topLeading)
         .background(shape.fill(Color.primary.opacity(isSelected ? 0.11 : 0.05)))
         .overlay(shape.strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.06), lineWidth: isSelected ? 1.5 : 1))
+        .animation(.easeOut(duration: 0.12), value: isSelected)
         .contentShape(shape)
         .onHover { inside in if inside { onHover() } }
         .onTapGesture { onPaste(false) }
@@ -219,7 +249,7 @@ struct ClipboardItemCard: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11))
-                .frame(width: 22, height: 22)
+                .frame(width: Self.iconSize, height: Self.iconSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -236,7 +266,7 @@ struct ClipboardItemContent: View {
         case .text:
             Text(Self.preview(item.preview))
                 .font(.system(size: 12.5))
-                .lineLimit(5)
+                .lineLimit(7)
                 .multilineTextAlignment(.leading)
 
         case .image:
@@ -316,6 +346,82 @@ struct SearchField: NSViewRepresentable {
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
             text.wrappedValue = field.stringValue
+        }
+    }
+}
+
+// MARK: Moving and resizing the panel
+
+enum ResizePhase { case began, changed, ended }
+
+/// Transparent area that moves the panel when dragged, like a title bar.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        // The window server moves the window, so the drag is as smooth as a real title bar.
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+    }
+}
+
+/// Transparent strip along the bottom edge that resizes the panel's height when dragged.
+struct ResizeGrip: NSViewRepresentable {
+    let onResize: (ResizePhase) -> Void
+
+    func makeNSView(context: Context) -> GripView {
+        let view = GripView()
+        view.onResize = onResize
+        return view
+    }
+
+    func updateNSView(_ view: GripView, context: Context) { view.onResize = onResize }
+
+    final class GripView: NSView {
+        var onResize: ((ResizePhase) -> Void)?
+        private var isDragging = false
+        private var isInside = false
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        // The panel doesn't activate the app, so cursor rects alone aren't reliable;
+        // an always-active tracking area sets the cursor instead.
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
+                owner: self
+            ))
+        }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeUpDown) }
+        override func cursorUpdate(with event: NSEvent) { NSCursor.resizeUpDown.set() }
+        override func mouseEntered(with event: NSEvent) { isInside = true; NSCursor.resizeUpDown.set() }
+        override func mouseMoved(with event: NSEvent) { NSCursor.resizeUpDown.set() }
+        override func mouseExited(with event: NSEvent) {
+            isInside = false
+            if !isDragging { NSCursor.arrow.set() }
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            isDragging = true
+            NSCursor.resizeUpDown.set()
+            onResize?(.began)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            NSCursor.resizeUpDown.set()
+            onResize?(.changed)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            isDragging = false
+            onResize?(.ended)
+            if !isInside { NSCursor.arrow.set() }
         }
     }
 }

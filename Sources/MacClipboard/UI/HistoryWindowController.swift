@@ -48,12 +48,19 @@ final class HistoryViewModel: ObservableObject {
 }
 
 final class HistoryWindowController: NSObject, NSWindowDelegate {
-    static let panelSize = NSSize(width: 360, height: 460)
+    static let panelWidth: CGFloat = 360
+    static let defaultPanelHeight: CGFloat = 540
+    static let minPanelHeight: CGFloat = 300
+    static let panelSize = NSSize(width: panelWidth, height: defaultPanelHeight)
+    /// Space kept between the panel and the caret or the screen edges.
+    private static let gap: CGFloat = 6
 
     private let store: ClipboardStore
     private let settings: AppSettings
     private let model = HistoryViewModel()
     private let panel = HistoryPanel(size: HistoryWindowController.panelSize)
+    /// Panel frame and mouse position when a bottom-edge resize started.
+    private var resizeStart: (frame: NSRect, mouseY: CGFloat)?
     private var clickMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
 
@@ -73,9 +80,12 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
             settings: settings,
             model: model,
             onPaste: { [weak self] item, plain in self?.paste(item, plainTextOnly: plain) },
-            onHoverItem: { [weak self] id in self?.hover(id) }
+            onHoverItem: { [weak self] id in self?.hover(id) },
+            onResize: { [weak self] phase in self?.resize(phase) }
         )
         let hosting = NSHostingView(rootView: root)
+        // The panel sets the size; SwiftUI just fills it (no size constraints fighting a resize).
+        hosting.sizingOptions = []
         hosting.frame = effect.bounds
         hosting.autoresizingMask = [.width, .height]
         effect.addSubview(hosting)
@@ -114,7 +124,7 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
         model.scrollTarget = store.items.first?.id
         model.mouseLocationAtKeyboardMove = NSEvent.mouseLocation
 
-        panel.setFrameOrigin(origin(for: Self.panelSize))
+        panel.setFrame(initialFrame(), display: true)
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
         if let field = model.searchField { panel.makeFirstResponder(field) }
@@ -141,11 +151,17 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
     // MARK: Positioning
 
     /// Like Windows, open next to the text caret; fall back to the mouse pointer.
-    private func origin(for size: NSSize) -> NSPoint {
+    /// Uses the height the user last dragged the panel to, if it fits on the screen.
+    private func initialFrame() -> NSRect {
         let anchor = Accessibility.caretRect() ?? NSRect(origin: NSEvent.mouseLocation, size: .zero)
         let screen = NSScreen.screens.first { $0.frame.contains(anchor.origin) } ?? NSScreen.main ?? NSScreen.screens[0]
         let visible = screen.visibleFrame
-        let gap: CGFloat = 6
+        let gap = Self.gap
+
+        let saved = CGFloat(settings.panelHeight)
+        let wanted = saved > 0 ? saved : Self.defaultPanelHeight
+        let height = min(max(wanted, Self.minPanelHeight), visible.height - gap * 2)
+        let size = NSSize(width: Self.panelWidth, height: height)
 
         var x = anchor.minX
         var y = anchor.minY - gap - size.height       // below the caret
@@ -153,7 +169,30 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
 
         x = min(max(x, visible.minX + gap), visible.maxX - size.width - gap)
         y = min(max(y, visible.minY + gap), visible.maxY - size.height - gap)
-        return NSPoint(x: x, y: y)
+        return NSRect(origin: NSPoint(x: x, y: y), size: size)
+    }
+
+    /// Dragging the bottom edge: the top stays put and the bottom follows the mouse.
+    private func resize(_ phase: ResizePhase) {
+        let mouseY = NSEvent.mouseLocation.y
+        switch phase {
+        case .began:
+            resizeStart = (panel.frame, mouseY)
+        case .changed, .ended:
+            guard let start = resizeStart else { return }
+            let visible = (panel.screen ?? NSScreen.main)?.visibleFrame ?? start.frame
+            let top = start.frame.maxY
+            let maxHeight = max(top - visible.minY - Self.gap, Self.minPanelHeight)
+            let height = min(max(start.frame.height + (start.mouseY - mouseY), Self.minPanelHeight), maxHeight).rounded()
+            if height != panel.frame.height {
+                panel.setFrame(NSRect(x: start.frame.minX, y: top - height, width: start.frame.width, height: height), display: true)
+                panel.invalidateShadow()
+            }
+            if phase == .ended {
+                settings.panelHeight = Double(height)
+                resizeStart = nil
+            }
+        }
     }
 
     // MARK: Actions
