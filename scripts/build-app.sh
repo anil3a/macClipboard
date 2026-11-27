@@ -35,6 +35,32 @@ case "$FLAVOR" in
   *) echo "Usage: $0 [direct|appstore]" >&2; exit 1 ;;
 esac
 
+# --- SDK ---------------------------------------------------------------------
+# From the macOS 27 SDK on, SwiftUI's @State is a macro whose plugin ships only with Xcode.
+# With just the Command Line Tools the default SDK then fails to compile, so probe the installed
+# SDKs (newest first) and build against the first one that can type-check a SwiftUI view.
+# Set SDKROOT yourself to skip the probe.
+if [[ -z "${SDKROOT:-}" ]]; then
+  PROBE="$(mktemp -d)"
+  printf 'import SwiftUI\nstruct P: View { @State var n = 0; var body: some View { EmptyView() } }\n' > "$PROBE/p.swift"
+  DEFAULT_SDK="$(xcrun --show-sdk-path)"
+  if ! xcrun swiftc -typecheck -sdk "$DEFAULT_SDK" "$PROBE/p.swift" >/dev/null 2>&1; then
+    for SDK in $(find "$(dirname "$DEFAULT_SDK")" -maxdepth 1 -type d -name 'MacOSX*.sdk' | sort -rV); do
+      if xcrun swiftc -typecheck -sdk "$SDK" "$PROBE/p.swift" >/dev/null 2>&1; then
+        export SDKROOT="$SDK"
+        echo "Default SDK can't build SwiftUI without Xcode; using $(basename "$SDK")."
+        break
+      fi
+    done
+    if [[ -z "${SDKROOT:-}" ]]; then
+      rm -rf "$PROBE"
+      echo "No installed macOS SDK can build SwiftUI with this toolchain. Install Xcode, or an older Command Line Tools SDK." >&2
+      exit 1
+    fi
+  fi
+  rm -rf "$PROBE"
+fi
+
 # --- Compile -----------------------------------------------------------------
 if [[ "${UNIVERSAL:-1}" == "1" ]]; then
   BINARIES=()
